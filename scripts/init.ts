@@ -1,9 +1,13 @@
 #!/usr/bin/env bun
 // Runs project.init to init the project on the other server.
 
-const API_URL = "http://localhost:3000";
+import { requireGlobalInit, getRemote, healthcheck } from "./lib/config";
 
 async function main() {
+  await requireGlobalInit();
+  const API_URL = await getRemote();
+  await healthcheck();
+
   const cwd = process.cwd();
 
   // 1. Check if this is a Next.js project

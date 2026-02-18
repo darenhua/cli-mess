@@ -1,14 +1,24 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+
+function projectNameFromUrl(remoteUrl: string): string {
+    return remoteUrl
+        .split("/")
+        .pop()!
+        .replace(/\.git$/, "");
+}
 
 const PROJECTS_DIR = join(import.meta.dir, ".projects");
 
 Bun.serve({
     port: 3000,
     routes: {
+        "/healthz": new Response("ok"),
         "/api/project/init": {
             POST: async (req) => {
-                const { remoteUrl } = await req.json();
+                const { remoteUrl } = (await req.json()) as {
+                    remoteUrl: unknown;
+                };
 
                 if (!remoteUrl || typeof remoteUrl !== "string") {
                     return Response.json(
@@ -17,21 +27,12 @@ Bun.serve({
                     );
                 }
 
-                // Derive a project name from the remote URL
-                // e.g. "git@github.com:user/repo.git" -> "repo"
-                //      "https://github.com/user/repo.git" -> "repo"
-                const projectName = remoteUrl
-                    .split("/")
-                    .pop()!
-                    .replace(/\.git$/, "");
-
+                const projectName = projectNameFromUrl(remoteUrl);
                 const projectDir = join(PROJECTS_DIR, projectName);
                 const referenceDir = join(projectDir, "reference");
 
-                // Create project folder structure
                 await mkdir(referenceDir, { recursive: true });
 
-                // Clone into the reference directory
                 const result =
                     await Bun.$`git clone ${remoteUrl} ${referenceDir}`.quiet();
 
@@ -52,6 +53,44 @@ Bun.serve({
                     projectName,
                     projectDir,
                     referenceDir,
+                });
+            },
+        },
+        "/api/project/cleanup": {
+            POST: async (req) => {
+                const { remoteUrl } = (await req.json()) as {
+                    remoteUrl: unknown;
+                };
+
+                if (!remoteUrl || typeof remoteUrl !== "string") {
+                    return Response.json(
+                        { error: "remoteUrl is required" },
+                        { status: 400 }
+                    );
+                }
+
+                const projectName = projectNameFromUrl(remoteUrl);
+                const projectDir = join(PROJECTS_DIR, projectName);
+
+                // Check if the project directory exists
+                const exists = await Bun.file(
+                    join(projectDir, "reference/.git/HEAD")
+                ).exists();
+
+                if (!exists) {
+                    return Response.json(
+                        { error: "project not found", projectName },
+                        { status: 404 }
+                    );
+                }
+
+                await rm(projectDir, { recursive: true, force: true });
+                console.log(`Deleted project ${projectName} at ${projectDir}`);
+
+                return Response.json({
+                    ok: true,
+                    projectName,
+                    deleted: projectDir,
                 });
             },
         },
